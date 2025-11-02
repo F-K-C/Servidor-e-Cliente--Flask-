@@ -11,7 +11,7 @@ def receive_message():
     text_bytes = text.encode("utf-8")
     text_b64 = base64.b64encode(text_bytes).decode("utf-8")
 
-    return jsonify({"encoded message": text_b64, "status": "ok"})
+    return jsonify({"Mensagem codificada em base64": text_b64, "status": "ok"})
 
 if __name__ == "__main__":
     app.run(debug=True, port=3030)
