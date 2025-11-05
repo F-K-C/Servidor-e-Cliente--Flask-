@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/home/pqcime/Documents/Projeto PQC/Servidor-e-Cliente--Flask-/venv/bin/python3" "$0" "$@"
-' '''
+#!/home/pqcime/PQCnovo/pq3_server/venv/bin/python3
 import sys
 from flask.cli import main
 if __name__ == '__main__':
