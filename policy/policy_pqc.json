@@ -1,6 +1,6 @@
 {
-  "pqc_kem": "kyber512",
-  "classical_kex": "RSA",
+  "pqc_kem": "mlkem512",
+  "classical_kex": "X25519",
   "symmetric": {
     "algorithm": "AES-256-GCM",
     "key_len": 32,

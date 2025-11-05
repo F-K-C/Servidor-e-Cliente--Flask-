@@ -5,6 +5,10 @@ from crypto.encryptor import HybridEncryptor
 from crypto.openssl_utils import OpenSSLCLI
 
 os.environ["OPENSSL_MODULES"] = os.path.expanduser("~/PQCnovo/oqs-provider/build/lib")
+os.environ["PATH"] = os.path.expanduser("~/PQCnovo/openssl-3.5/bin") + ":" + os.environ.get("PATH", "")
+
+print("[DEBUG] OPENSSL_MODULES =", os.environ["OPENSSL_MODULES"])
+print("[DEBUG] PATH =", os.environ["PATH"])
 
 BASE_DIR = os.path.dirname(__file__)
 POLICY_PATH = os.path.join(BASE_DIR, "policy", "policy_pqc.json")

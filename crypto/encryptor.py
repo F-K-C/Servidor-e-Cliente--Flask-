@@ -14,23 +14,23 @@ class HybridEncryptor:
         self.keys_dir = Path(keys_dir)
         self.openssl = openssl or OpenSSLCLI()
         self._ensure_keys_dir()
+        # --- Validação do KEM PQC ---
+        pqc_alg = self.policy.get("pqc_kem")
+        if not self.openssl.has_algorithm(pqc_alg):
+            raise ValueError(f"KEM PQC '{pqc_alg}' não encontrado no OpenSSL/OQS provider")
+
 
     def _ensure_keys_dir(self):
         self.keys_dir.mkdir(parents=True, exist_ok=True)
 
     # --- PQC Keypair ---
     def _gen_pqc_keypair(self, alg_name: str, priv_path: Path, pub_path: Path):
-        cmd = ["genpkey", "-algorithm", alg_name, "-out", str(priv_path)]
-        self.openssl.run(cmd)
+        self.openssl.run(["genpkey", "-algorithm", alg_name, "-out", str(priv_path)])
         self.openssl.run(["pkey", "-in", str(priv_path), "-pubout", "-out", str(pub_path)])
 
     # --- Classical Keypairs ---
     def _gen_classical_keypair_x25519(self, priv_path: Path, pub_path: Path):
         self.openssl.run(["genpkey", "-algorithm", "X25519", "-out", str(priv_path)])
-        self.openssl.run(["pkey", "-in", str(priv_path), "-pubout", "-out", str(pub_path)])
-
-    def _gen_classical_keypair_x448(self, priv_path: Path, pub_path: Path):
-        self.openssl.run(["genpkey", "-algorithm", "X448", "-out", str(priv_path)])
         self.openssl.run(["pkey", "-in", str(priv_path), "-pubout", "-out", str(pub_path)])
 
     def _gen_classical_keypair_rsa(self, priv_path: Path, pub_path: Path, key_size=2048):
@@ -46,24 +46,36 @@ class HybridEncryptor:
     def _encapsulate_kem(self, pubkey_path: Path, kem_ct_path: Path, shared_secret_path: Path):
         if not self.openssl.has_pkeyutl_encap():
             raise RuntimeError("OpenSSL pkeyutl -encap not available.")
-        self.openssl.run([
+    
+        cmd = [
             "pkeyutl",
-            "-encap",
             "-inkey", str(pubkey_path),
+            "-pubin",
+            "-encap",
             "-out", str(kem_ct_path),
-            "-secret", str(shared_secret_path)
-        ])
+            "-secret", str(shared_secret_path),
+            "-provider", "default",
+            "-provider", "oqsprovider",
+            "-provider-path", os.path.expanduser("~/PQCnovo/oqs-provider/build/lib")
+            ]
+
+        self.openssl.run(cmd)
+
 
     def _decapsulate_kem(self, privkey_path: Path, kem_ct_path: Path, shared_secret_path: Path):
         if not self.openssl.has_pkeyutl_encap():
             raise RuntimeError("OpenSSL pkeyutl -decap not available.")
         self.openssl.run([
-            "pkeyutl",
-            "-decap",
-            "-inkey", str(privkey_path),
-            "-in", str(kem_ct_path),
-            "-secret", str(shared_secret_path)
+        "pkeyutl",
+        "-decap",
+        "-inkey", str(privkey_path),
+        "-in", str(kem_ct_path),
+        "-secret", str(shared_secret_path),
+        "-provider", "default",
+        "-provider", "oqsprovider",
+        "-provider-path", os.path.expanduser("~/PQCnovo/oqs-provider/build/lib")
         ])
+
 
     # --- HKDF Derivation ---
     @staticmethod
@@ -71,11 +83,16 @@ class HybridEncryptor:
         hkdf = HKDF(algorithm=hashes.SHA256(), length=length, salt=salt or None, info=info)
         return hkdf.derive(shared_secret)
 
-    # --- AES-GCM ---
+    # --- AES-GCM Encryption ---
     @staticmethod
-    def _aes_gcm_encrypt(key: bytes, plaintext: bytes, nonce: bytes):
+    def _aes_gcm_encrypt(key: bytes, plaintext: bytes, nonce: bytes) -> bytes:
         aesgcm = AESGCM(key)
         return aesgcm.encrypt(nonce, plaintext, associated_data=None)
+
+    @staticmethod
+    def _aes_gcm_decrypt(key: bytes, ciphertext: bytes, nonce: bytes) -> bytes:
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext, associated_data=None)
 
     # --- Encrypt Message ---
     def encrypt_message(self, plaintext: bytes):
@@ -85,36 +102,41 @@ class HybridEncryptor:
         key_len = sym.get("key_len", 32)
         nonce_len = sym.get("nonce_len", 12)
 
+        # Paths
         pqc_priv = self.keys_dir / "pqc_priv.pem"
         pqc_pub = self.keys_dir / "pqc_pub.pem"
         classical_priv = self.keys_dir / "classical_priv.pem"
         classical_pub = self.keys_dir / "classical_pub.pem"
 
+        # Generate PQC keys if missing
         if not pqc_priv.exists() or not pqc_pub.exists():
             self._gen_pqc_keypair(pqc_alg, pqc_priv, pqc_pub)
 
+        # Generate classical keys if missing
         classical_upper = classical.upper()
         if classical_upper == "X25519":
             if not classical_priv.exists() or not classical_pub.exists():
                 self._gen_classical_keypair_x25519(classical_priv, classical_pub)
-        elif classical_upper == "X448":
-            if not classical_priv.exists() or not classical_pub.exists():
-                self._gen_classical_keypair_x448(classical_priv, classical_pub)
         elif classical_upper == "RSA":
             if not classical_priv.exists() or not classical_pub.exists():
                 self._gen_classical_keypair_rsa(classical_priv, classical_pub)
         else:
             raise NotImplementedError(f"Classical key type '{classical}' not implemented.")
 
+        # KEM encapsulation
         kem_ct = self.keys_dir / "kem_ct.bin"
         shared_secret_file = self.keys_dir / "shared_secret.bin"
         self._encapsulate_kem(pqc_pub, kem_ct, shared_secret_file)
         shared_secret = shared_secret_file.read_bytes()
 
+        # Derive symmetric key
         sym_key = self._derive_key_hkdf(shared_secret, length=key_len)
         nonce = os.urandom(nonce_len)
+
+        # Encrypt plaintext using AES-GCM (Python)
         ciphertext = self._aes_gcm_encrypt(sym_key, plaintext, nonce)
 
+        # Prepare result JSON
         result = {
             "ciphertext": base64.b64encode(ciphertext).decode("utf-8"),
             "nonce": base64.b64encode(nonce).decode("utf-8"),
@@ -144,8 +166,7 @@ class HybridEncryptor:
         key_len = sym.get("key_len", 32)
         sym_key = self._derive_key_hkdf(shared_secret, length=key_len)
 
-        aesgcm = AESGCM(sym_key)
-        plaintext = aesgcm.decrypt(nonce_bytes, ciphertext_bytes, associated_data=None)
+        plaintext = self._aes_gcm_decrypt(sym_key, ciphertext_bytes, nonce_bytes)
 
         kem_ct_file.unlink(missing_ok=True)
         shared_secret_file.unlink(missing_ok=True)
