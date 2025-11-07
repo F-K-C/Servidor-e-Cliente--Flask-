@@ -1,6 +1,6 @@
 {
-  "pqc_kem": "mlkem512",
-  "classical_kex": "X25519",
+  "pqc_kem": "mayo1",
+  "classical_kex": "rsa",
   "symmetric": {
     "algorithm": "AES-256-GCM",
     "key_len": 32,
