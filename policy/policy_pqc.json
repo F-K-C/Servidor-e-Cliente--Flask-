@@ -1,9 +1,10 @@
 {
-  "pqc_kem": "bikel1",
-  "classical_kex": "rsa",
+  "pqc_kem": "falcon512",
+  "classical_kex": "X25519",
   "symmetric": {
     "algorithm": "AES-256-GCM",
     "key_len": 32,
     "nonce_len": 12
   }
 }
+
