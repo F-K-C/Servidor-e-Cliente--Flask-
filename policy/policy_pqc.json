@@ -1,5 +1,5 @@
 {
-  "pqc_kem": "mayo1",
+  "pqc_kem": "bikel1",
   "classical_kex": "rsa",
   "symmetric": {
     "algorithm": "AES-256-GCM",
